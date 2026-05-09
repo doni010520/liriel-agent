@@ -1,0 +1,39 @@
+from pydantic_settings import BaseSettings
+from functools import lru_cache
+
+
+class Settings(BaseSettings):
+    # App
+    app_env: str = "production"
+    app_port: int = 8000
+    log_level: str = "INFO"
+
+    # Database
+    database_url: str = "postgresql+asyncpg://liriel:liriel_secret@postgres:5432/liriel_db"
+
+    # Redis
+    redis_url: str = "redis://redis:6379/0"
+
+    # OpenAI
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4.1-mini"
+    openai_temperature: float = 0.3
+    openai_max_tokens: int = 1024
+
+    # Uazapi
+    uazapi_base_url: str = ""
+    uazapi_api_key: str = ""  # Instance token (header: token)
+
+    # Buffer
+    buffer_delay_seconds: int = 12
+    max_history_messages: int = 20
+
+    # Webhook
+    webhook_secret: str = ""
+
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
