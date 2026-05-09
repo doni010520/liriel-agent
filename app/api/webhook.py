@@ -21,7 +21,7 @@ async def uazapi_webhook(request: Request):
     """
     try:
         payload = await request.json()
-        logger.debug(f"Webhook received: {payload}")
+        logger.info(f"Webhook payload: {payload}")
 
         # Parse the webhook payload
         parsed = UazapiClient.parse_webhook(payload)
