@@ -16,7 +16,7 @@ from app.core.database import engine, Base
 from app.core.logging import setup_logging
 from app.core.redis import close_redis
 from app.models.models import Contact, Conversation, Message, KnowledgeBase, Event, NotificationLog  # noqa
-from app.services.rag_service import setup_pgvector
+from app.services.rag_service import setup_pgvector, seed_if_empty
 from app.services.events_service import setup_events_pgvector, cleanup_past_events
 
 
@@ -36,6 +36,9 @@ async def lifespan(app: FastAPI):
     # Setup pgvector for knowledge base and events
     await setup_pgvector()
     await setup_events_pgvector()
+
+    # Seed knowledge base on first boot (idempotent — no-op if already seeded)
+    await seed_if_empty()
 
     # Cleanup past events
     await cleanup_past_events()

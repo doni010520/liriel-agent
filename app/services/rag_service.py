@@ -20,6 +20,31 @@ EMBEDDING_MODEL = "text-embedding-3-small"
 EMBEDDING_DIMENSIONS = 1536
 
 
+async def seed_if_empty() -> int:
+    """Seed the knowledge base on startup ONLY if it's empty.
+
+    Idempotent: skips silently if any rows exist. Returns the number
+    of entries inserted (0 if already seeded).
+    """
+    from app.services.knowledge_data import KNOWLEDGE_ENTRIES
+
+    async with async_session() as session:
+        result = await session.execute(text("SELECT COUNT(*) FROM knowledge_base"))
+        count = result.scalar() or 0
+
+    if count > 0:
+        logger.info(f"Knowledge base already seeded ({count} entries) — skipping")
+        return 0
+
+    logger.info(f"Knowledge base empty — seeding {len(KNOWLEDGE_ENTRIES)} entries...")
+    inserted = 0
+    for category, title, content in KNOWLEDGE_ENTRIES:
+        if await add_knowledge(category, title, content):
+            inserted += 1
+    logger.info(f"Knowledge base seeded ({inserted}/{len(KNOWLEDGE_ENTRIES)} entries)")
+    return inserted
+
+
 async def setup_pgvector():
     """Create pgvector extension and embedding column if they don't exist.
     Called on app startup.
