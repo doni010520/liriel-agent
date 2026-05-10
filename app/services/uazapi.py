@@ -193,70 +193,89 @@ class UazapiClient:
     def parse_webhook(payload: dict) -> dict | None:
         """Parse incoming Uazapi v2 webhook into normalized format.
 
-        Uazapi v2 WebhookEvent:
+        Actual Uazapi v2 payload structure:
         {
-            "event": "message",
-            "instance": "...",
-            "data": {
-                "messageid": "...",
-                "chatid": "5511999999999@s.whatsapp.net",
-                "sender": "5511999999999@s.whatsapp.net",
-                "senderName": "João",
+            "EventType": "messages",
+            "message": {
+                "chatid": "557193061031@s.whatsapp.net",
+                "sender_pn": "557193061031@s.whatsapp.net",
+                "senderName": "Adonias Santos",
+                "text": "Hello",
+                "messageid": "3EB01963E905F31A3D658A",
                 "isGroup": false,
                 "fromMe": false,
-                "messageType": "conversation",  # or image, audio, document, etc.
-                "text": "Hello",
-                "content": { ... },
+                "messageType": "Conversation",
+                "quoted": "",
+                "content": "...",
                 ...
-            }
+            },
+            "chat": { "phone": "+55 71 9306-1031", ... },
+            ...
         }
         """
         try:
-            # Support both WebhookEvent format and flat format
             event = payload.get("event") or payload.get("EventType", "")
-            data = payload.get("data", payload)
 
             # Only process incoming messages
             if event not in ("message", "messages"):
                 logger.debug(f"Ignoring webhook event: {event}")
                 return None
 
+            # Message data is in payload["message"], not payload["data"]
+            msg = payload.get("message") or payload.get("data", {})
+
             # Skip messages sent by us
-            if data.get("fromMe", False):
+            if msg.get("fromMe", False):
                 return None
 
             # Skip group messages
-            if data.get("isGroup", False):
+            if msg.get("isGroup", False):
                 return None
 
-            # Extract phone from chatid or sender
-            chat_id = data.get("chatid") or data.get("sender", "")
+            # Extract phone from chatid or sender_pn
+            chat_id = (
+                msg.get("chatid")
+                or msg.get("sender_pn")
+                or msg.get("sender", "")
+            )
             phone = chat_id.split("@")[0] if chat_id else ""
+
+            # If phone is a LID (not digits), try sender_pn
+            if not phone or not phone.isdigit():
+                sender_pn = msg.get("sender_pn", "")
+                phone = sender_pn.split("@")[0] if sender_pn else ""
+
+            # Last resort: try chat.phone field
+            if not phone or not phone.isdigit():
+                chat_data = payload.get("chat", {})
+                raw_phone = chat_data.get("phone", "")
+                # Clean "+55 71 9306-1031" → "557193061031"
+                phone = "".join(c for c in raw_phone if c.isdigit())
 
             if not phone or not phone.isdigit():
                 logger.warning(f"Invalid phone from webhook: {chat_id}")
                 return None
 
             # Message type mapping
-            msg_type_raw = data.get("messageType", "conversation")
+            msg_type_raw = msg.get("messageType") or msg.get("type", "conversation")
             msg_type = _normalize_message_type(msg_type_raw)
 
             # Message ID for media download
-            message_id = data.get("messageid") or data.get("id", "")
+            message_id = msg.get("messageid") or msg.get("id", "")
 
             # Text content
-            text = data.get("text", "")
+            text = msg.get("text", "")
 
             return {
                 "phone": phone,
                 "body": str(text).strip() if text else "",
                 "type": msg_type,
                 "type_raw": msg_type_raw,
-                "push_name": data.get("senderName", ""),
+                "push_name": msg.get("senderName", ""),
                 "message_id": message_id,
-                "quoted_id": data.get("quoted", ""),
-                "timestamp": data.get("messageTimestamp", 0),
-                "content": data.get("content", {}),
+                "quoted_id": msg.get("quoted", ""),
+                "timestamp": msg.get("messageTimestamp", 0),
+                "content": msg.get("content", {}),
             }
 
         except Exception as e:
@@ -268,6 +287,7 @@ def _normalize_message_type(raw_type: str) -> str:
     """Map Uazapi messageType to our internal types."""
     mapping = {
         "conversation": "text",
+        "Conversation": "text",
         "extendedTextMessage": "text",
         "imageMessage": "image",
         "videoMessage": "video",
