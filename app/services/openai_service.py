@@ -2,12 +2,15 @@
 OpenAI GPT Service.
 
 Loads Liriel's system prompt and injects:
+- {current_datetime} — Salvador/BA local time, so the model greets correctly
 - {contact_context} — who the person is
 - {events_context} — upcoming church events
 - {rag_context} — knowledge base search results
 """
 
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from openai import AsyncOpenAI
 from loguru import logger
@@ -20,6 +23,31 @@ client = AsyncOpenAI(api_key=settings.openai_api_key)
 PROMPT_PATH = Path(__file__).parent.parent.parent / "prompts" / "liriel_system_prompt.txt"
 
 _prompt_cache: str | None = None
+
+SALVADOR_TZ = ZoneInfo("America/Bahia")
+_WEEKDAYS_PT = [
+    "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira",
+    "sexta-feira", "sábado", "domingo",
+]
+
+
+def _current_datetime_pt() -> str:
+    """Format Salvador/BA local time as a Portuguese phrase the model can read.
+
+    Example: "domingo, 10/05/2026, 08:14 (manhã)"
+    """
+    now = datetime.now(SALVADOR_TZ)
+    weekday = _WEEKDAYS_PT[now.weekday()]
+    hour = now.hour
+    if hour < 5:
+        period = "madrugada"
+    elif hour < 12:
+        period = "manhã"
+    elif hour < 18:
+        period = "tarde"
+    else:
+        period = "noite"
+    return f"{weekday}, {now.strftime('%d/%m/%Y')}, {now.strftime('%H:%M')} ({period})"
 
 
 def _load_prompt() -> str:
@@ -46,6 +74,7 @@ def build_system_prompt(
     template = _load_prompt()
     return (
         template
+        .replace("{current_datetime}", _current_datetime_pt())
         .replace("{contact_context}", contact_context or "Primeiro contato — informações ainda não disponíveis.")
         .replace("{events_context}", events_context or "Nenhum evento cadastrado no momento.")
         .replace("{rag_context}", rag_context or "")
