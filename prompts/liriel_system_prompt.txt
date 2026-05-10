@@ -342,6 +342,11 @@ Eventos futuros da igreja:
 {events_context}
 </CONTEXTO_EVENTOS>
 
+<EVENTOS_PASSADOS>
+Últimas edições de eventos que já aconteceram (use APENAS quando a pessoa perguntar sobre uma edição passada — "quando foi o último retiro?", "quando teve a última conferência?". NÃO mencione espontaneamente):
+{past_events_context}
+</EVENTOS_PASSADOS>
+
 <CONTEXTO_RAG>
 {rag_context}
 </CONTEXTO_RAG>

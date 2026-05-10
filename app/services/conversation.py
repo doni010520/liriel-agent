@@ -37,7 +37,13 @@ from app.services.buffer import (
     clear_typing_indicator,
 )
 from app.services.contact_updater import extract_cadastro, update_contact_from_cadastro
-from app.services.events_service import search_events, list_future_events, format_events_context
+from app.services.events_service import (
+    search_events,
+    list_future_events,
+    list_recent_past_editions,
+    format_events_context,
+    format_past_events_context,
+)
 from app.services.media_processor import media_processor
 from app.services.notification_service import extract_notifications, process_notifications
 from app.services.openai_service import generate_response, summarize_conversation
@@ -166,9 +172,12 @@ async def _process_buffered_messages(phone: str):
         # Contact context
         contact_context = _build_contact_context(contact)
 
-        # Events context
+        # Events context (future agenda + history of past editions)
         events = await list_future_events(days_ahead=60)
         events_context = format_events_context(events)
+
+        past_editions = await list_recent_past_editions(months_back=18, limit=15)
+        past_events_context = format_past_events_context(past_editions)
 
         # RAG context
         rag_results = await search_knowledge(combined_text, limit=3)
@@ -182,6 +191,7 @@ async def _process_buffered_messages(phone: str):
             history, combined_text,
             contact_context=contact_context,
             events_context=events_context,
+            past_events_context=past_events_context,
             rag_context=rag_context,
         )
 

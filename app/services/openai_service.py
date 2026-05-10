@@ -68,6 +68,7 @@ def _load_prompt() -> str:
 def build_system_prompt(
     contact_context: str = "",
     events_context: str = "",
+    past_events_context: str = "",
     rag_context: str = "",
 ) -> str:
     """Build the full system prompt with all dynamic contexts injected."""
@@ -77,6 +78,7 @@ def build_system_prompt(
         .replace("{current_datetime}", _current_datetime_pt())
         .replace("{contact_context}", contact_context or "Primeiro contato — informações ainda não disponíveis.")
         .replace("{events_context}", events_context or "Nenhum evento cadastrado no momento.")
+        .replace("{past_events_context}", past_events_context or "Nenhum evento passado registrado ainda.")
         .replace("{rag_context}", rag_context or "")
     )
 
@@ -86,6 +88,7 @@ async def generate_response(
     user_message: str,
     contact_context: str = "",
     events_context: str = "",
+    past_events_context: str = "",
     rag_context: str = "",
 ) -> tuple[str, int]:
     """Generate GPT response with all contexts.
@@ -93,7 +96,9 @@ async def generate_response(
     Returns (response_text, total_tokens_used).
     Response may contain [NOTIFICAR:...] tags to be processed by notification_service.
     """
-    prompt = build_system_prompt(contact_context, events_context, rag_context)
+    prompt = build_system_prompt(
+        contact_context, events_context, past_events_context, rag_context
+    )
 
     messages = [{"role": "system", "content": prompt}]
     messages.extend(messages_history)

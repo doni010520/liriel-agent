@@ -103,23 +103,28 @@ async def add_event(
 
 
 async def remove_event(name: str) -> bool:
-    """Remove event by name (case-insensitive partial match)."""
+    """Soft-delete event by name (case-insensitive partial match).
+
+    Sets is_active=false instead of DELETE so canceled events are
+    excluded from both the future agenda and the history feed.
+    """
     try:
         async with async_session() as db:
             result = await db.execute(
                 text("""
-                    DELETE FROM events 
+                    UPDATE events
+                    SET is_active = false
                     WHERE LOWER(name) LIKE LOWER(:pattern) AND is_active = true
                     RETURNING id
                 """),
                 {"pattern": f"%{name}%"},
             )
             await db.commit()
-            deleted = result.fetchall()
-            if deleted:
-                logger.info(f"Removed {len(deleted)} event(s) matching '{name}'")
+            updated = result.fetchall()
+            if updated:
+                logger.info(f"Soft-deleted {len(updated)} event(s) matching '{name}'")
                 return True
-            logger.warning(f"No events found matching '{name}'")
+            logger.warning(f"No active events found matching '{name}'")
             return False
     except Exception as e:
         logger.error(f"Error removing event: {e}")
@@ -335,24 +340,64 @@ async def seed_sample_events_if_empty() -> int:
     return inserted
 
 
-async def cleanup_past_events():
-    """Remove events that have already passed. Run daily."""
+async def list_recent_past_editions(
+    months_back: int = 18, limit: int = 15
+) -> list[dict]:
+    """Return the most recent past occurrence of each unique event name.
+
+    Powers 'quando foi a última vez que aconteceu X' answers without
+    polluting the live agenda. Excludes events soft-deleted by admin
+    (is_active=false) and events older than the cutoff window.
+    """
     try:
-        yesterday = date.today() - timedelta(days=1)
+        today = date.today()
+        cutoff = today - timedelta(days=months_back * 31)
+
         async with async_session() as db:
             result = await db.execute(
                 text("""
-                    DELETE FROM events WHERE event_date < :yesterday
-                    RETURNING id
+                    SELECT name, event_date, location, description
+                    FROM (
+                        SELECT DISTINCT ON (name)
+                            name, event_date, location, description
+                        FROM events
+                        WHERE is_active = true
+                          AND event_date < :today
+                          AND event_date >= :cutoff
+                        ORDER BY name, event_date DESC
+                    ) latest
+                    ORDER BY event_date DESC
+                    LIMIT :limit
                 """),
-                {"yesterday": yesterday},
+                {"today": today, "cutoff": cutoff, "limit": limit},
             )
-            await db.commit()
-            deleted = result.fetchall()
-            if deleted:
-                logger.info(f"Cleaned up {len(deleted)} past event(s)")
+            rows = result.fetchall()
+
+        return [
+            {
+                "name": r.name,
+                "date": r.event_date.strftime("%d/%m/%Y"),
+                "location": r.location or "",
+                "description": r.description or "",
+            }
+            for r in rows
+        ]
     except Exception as e:
-        logger.error(f"Event cleanup error: {e}")
+        logger.error(f"Error listing past editions: {e}")
+        return []
+
+
+def format_past_events_context(events: list[dict]) -> str:
+    """Format past editions for prompt injection."""
+    if not events:
+        return "Nenhum evento passado registrado ainda."
+
+    lines = []
+    for e in events:
+        loc_str = f" — {e['location']}" if e.get("location") else ""
+        lines.append(f"- {e['name']}: última edição em {e['date']}{loc_str}")
+
+    return "\n".join(lines)
 
 
 def format_events_context(events: list[dict]) -> str:

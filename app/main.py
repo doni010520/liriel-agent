@@ -20,7 +20,6 @@ from app.services.admin_commands import bootstrap_admins
 from app.services.rag_service import setup_pgvector, seed_if_empty
 from app.services.events_service import (
     setup_events_pgvector,
-    cleanup_past_events,
     seed_sample_events_if_empty,
 )
 
@@ -53,9 +52,6 @@ async def lifespan(app: FastAPI):
 
     # Promote configured admin phone numbers (idempotent)
     await bootstrap_admins()
-
-    # Cleanup past events
-    await cleanup_past_events()
 
     logger.info("✅ Database, pgvector, events ready")
     logger.info(f"📡 Webhook: POST /webhook/uazapi")
