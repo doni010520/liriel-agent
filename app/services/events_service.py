@@ -59,7 +59,7 @@ async def add_event(
                         INSERT INTO events (id, name, description, event_date, start_time, end_time, 
                                            location, created_by, is_active, embedding, created_at)
                         VALUES (gen_random_uuid(), :name, :description, :event_date, :start_time, 
-                                :end_time, :location, :created_by, true, :embedding::vector, now())
+                                :end_time, :location, :created_by, true, CAST(:embedding AS vector), now())
                         RETURNING id
                     """),
                     {
@@ -99,14 +99,6 @@ async def add_event(
 
     except Exception as e:
         logger.error(f"Error creating event: {e}")
-        # Stash last error in Redis so we can inspect from /webhook flow
-        # in lieu of container log access (TEMPORARY DIAGNOSTIC)
-        try:
-            from app.core.redis import get_redis
-            r = await get_redis()
-            await r.set("liriel:diag:last_event_error", f"{type(e).__name__}: {e}", ex=3600)
-        except Exception:
-            pass
         return None
 
 
@@ -188,13 +180,13 @@ async def search_events(query: str, days_ahead: int = 120) -> list[dict]:
             result = await db.execute(
                 text("""
                     SELECT name, description, event_date, start_time, end_time, location,
-                           1 - (embedding <=> :embedding::vector) as similarity
+                           1 - (embedding <=> CAST(:embedding AS vector)) as similarity
                     FROM events
                     WHERE is_active = true 
                       AND event_date >= :today 
                       AND event_date <= :limit
                       AND embedding IS NOT NULL
-                    ORDER BY embedding <=> :embedding::vector
+                    ORDER BY embedding <=> CAST(:embedding AS vector)
                     LIMIT 5
                 """),
                 {

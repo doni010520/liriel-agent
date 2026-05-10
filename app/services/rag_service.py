@@ -112,7 +112,7 @@ async def add_knowledge(
             await session.execute(
                 text("""
                     INSERT INTO knowledge_base (id, category, title, content, embedding, is_active, created_at, updated_at)
-                    VALUES (gen_random_uuid(), :category, :title, :content, :embedding::vector, true, now(), now())
+                    VALUES (gen_random_uuid(), :category, :title, :content, CAST(:embedding AS vector), true, now(), now())
                 """),
                 {
                     "category": category,
@@ -158,10 +158,10 @@ async def search_knowledge(
 
         sql = text(f"""
             SELECT title, content, category,
-                   1 - (embedding <=> :embedding::vector) as similarity
+                   1 - (embedding <=> CAST(:embedding AS vector)) as similarity
             FROM knowledge_base
             WHERE is_active = true {category_filter}
-            ORDER BY embedding <=> :embedding::vector
+            ORDER BY embedding <=> CAST(:embedding AS vector)
             LIMIT :limit
         """)
 
