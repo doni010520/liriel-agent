@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.database import async_session
 from app.models.models import Contact, Conversation, Message
-from app.services.admin_commands import parse_admin_command
+from app.services.admin_commands import parse_admin_command, parse_self_serve_command
 from app.services.buffer import (
     add_to_buffer,
     get_buffered_messages,
@@ -62,6 +62,13 @@ async def handle_incoming_message(parsed: dict):
     phone = parsed["phone"]
     body = parsed["body"]
     msg_type = parsed["type"]
+
+    # ── Step -1: Self-serve commands (reset / wipe own data) ────
+    if body:
+        self_serve_response = await parse_self_serve_command(body, phone)
+        if self_serve_response is not None:
+            await uazapi.send_text(phone, self_serve_response)
+            return
 
     # ── Step 0: Check if admin command ─────────────────────────
     async with async_session() as db:
