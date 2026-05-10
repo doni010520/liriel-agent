@@ -8,6 +8,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     func,
@@ -158,6 +159,33 @@ class Event(Base):
     __table_args__ = (
         Index("ix_events_date", "event_date"),
         Index("ix_events_active_date", "is_active", "event_date"),
+    )
+
+
+class MediaAsset(Base):
+    """Binary assets (profile pic, banners) hosted in the DB.
+
+    Sync flow: files in /app/assets/ are read at boot, hashed, and upserted
+    into this table. Anything that needs the binary (e.g. Uazapi profile
+    picture push) reads from here, not from the filesystem.
+    """
+
+    __tablename__ = "media_assets"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    key: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    mime_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    last_pushed_sha256: Mapped[str | None] = mapped_column(String(64))
+    last_pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
 

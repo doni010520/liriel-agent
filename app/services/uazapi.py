@@ -77,6 +77,18 @@ class UazapiClient:
 
         return await self._post("/send/media", payload)
 
+    # ── Profile ────────────────────────────────────────────────
+
+    async def update_profile_image(self, image: str) -> dict | None:
+        """POST /profile/image — change the connected WhatsApp account's avatar.
+
+        Args:
+            image: HTTP/HTTPS URL, raw base64, or full data URI
+                   ('data:image/jpeg;base64,...'). Uazapi requires the
+                   final image to be JPEG 640x640.
+        """
+        return await self._post("/profile/image", {"image": image})
+
     # ── Download / Transcribe ──────────────────────────────────
 
     async def download_media(

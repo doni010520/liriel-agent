@@ -15,8 +15,17 @@ from app.core.config import get_settings
 from app.core.database import engine, Base, apply_schema_migrations
 from app.core.logging import setup_logging
 from app.core.redis import close_redis
-from app.models.models import Contact, Conversation, Message, KnowledgeBase, Event, NotificationLog  # noqa
+from app.models.models import (  # noqa
+    Contact,
+    Conversation,
+    Message,
+    KnowledgeBase,
+    Event,
+    NotificationLog,
+    MediaAsset,
+)
 from app.services.admin_commands import bootstrap_admins
+from app.services.media_assets import sync_assets_from_disk, push_profile_picture_if_changed
 from app.services.rag_service import setup_pgvector, seed_if_empty
 from app.services.events_service import (
     setup_events_pgvector,
@@ -53,7 +62,11 @@ async def lifespan(app: FastAPI):
     # Promote configured admin phone numbers (idempotent)
     await bootstrap_admins()
 
-    logger.info("✅ Database, pgvector, events ready")
+    # Sync media assets from disk to DB and push avatar to Uazapi if changed
+    await sync_assets_from_disk()
+    await push_profile_picture_if_changed()
+
+    logger.info("✅ Database, pgvector, events, assets ready")
     logger.info(f"📡 Webhook: POST /webhook/uazapi")
     logger.info(f"🔧 Admin panel: GET /admin/panel")
     logger.info(f"🤖 Model: {settings.openai_model}")
