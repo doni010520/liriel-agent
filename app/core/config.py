@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # whose Contact row should be auto-flagged is_admin=True at boot.
     admin_phones: str = "557193061031"
 
+    # WhatsApp profile name (max 25 chars, pushed to Uazapi /profile/name on boot
+    # when it differs from the current account name).
+    profile_name: str = "Lírio Armação"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
     @property

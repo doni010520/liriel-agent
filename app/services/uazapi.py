@@ -89,6 +89,33 @@ class UazapiClient:
         """
         return await self._post("/profile/image", {"image": image})
 
+    async def update_profile_name(self, name: str) -> dict | None:
+        """POST /profile/name — change the connected WhatsApp account's
+        display name (max 25 chars per Uazapi spec)."""
+        return await self._post("/profile/name", {"name": name[:25]})
+
+    async def get_instance_status(self) -> dict | None:
+        """GET /instance/status — fetch instance metadata + connection state.
+
+        Returns the parsed JSON or None on error. Used to read the current
+        profileName so we don't push a redundant /profile/name update.
+        """
+        url = self._url("/instance/status")
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(url, headers=self.headers)
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"Uazapi /instance/status HTTP {e.response.status_code}: "
+                f"{e.response.text[:200]}"
+            )
+            return None
+        except Exception as e:
+            logger.error(f"Uazapi /instance/status error: {e}")
+            return None
+
     # ── Download / Transcribe ──────────────────────────────────
 
     async def download_media(

@@ -25,7 +25,11 @@ from app.models.models import (  # noqa
     MediaAsset,
 )
 from app.services.admin_commands import bootstrap_admins
-from app.services.media_assets import sync_assets_from_disk, push_profile_picture_if_changed
+from app.services.media_assets import (
+    sync_assets_from_disk,
+    push_profile_picture_if_changed,
+    push_profile_name_if_changed,
+)
 from app.services.rag_service import setup_pgvector, seed_if_empty
 from app.services.events_service import (
     setup_events_pgvector,
@@ -62,9 +66,10 @@ async def lifespan(app: FastAPI):
     # Promote configured admin phone numbers (idempotent)
     await bootstrap_admins()
 
-    # Sync media assets from disk to DB and push avatar to Uazapi if changed
+    # Sync media assets from disk to DB and reconcile profile with Uazapi
     await sync_assets_from_disk()
     await push_profile_picture_if_changed()
+    await push_profile_name_if_changed()
 
     logger.info("✅ Database, pgvector, events, assets ready")
     logger.info(f"📡 Webhook: POST /webhook/uazapi")

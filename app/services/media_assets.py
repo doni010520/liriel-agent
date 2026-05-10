@@ -25,6 +25,7 @@ from pathlib import Path
 from loguru import logger
 from sqlalchemy import select
 
+from app.core.config import get_settings
 from app.core.database import async_session
 from app.models.models import MediaAsset
 from app.services.uazapi import uazapi
@@ -129,3 +130,40 @@ async def push_profile_picture_if_changed() -> bool:
             f"{len(asset.data)} bytes)"
         )
         return True
+
+
+async def push_profile_name_if_changed() -> bool:
+    """Reconcile the WhatsApp display name with settings.profile_name.
+
+    Reads the desired name from config, fetches the current name from
+    Uazapi /instance/status, and only POSTs /profile/name when the two
+    differ. WhatsApp rate-limits name changes, so the GET-then-compare
+    pattern keeps boots from burning that quota.
+    """
+    desired = (get_settings().profile_name or "").strip()
+    if not desired:
+        return False
+
+    status = await uazapi.get_instance_status()
+    if not status or "instance" not in status:
+        logger.warning("Could not fetch instance status — skipping name sync")
+        return False
+
+    current = (status.get("instance", {}).get("profileName") or "").strip()
+    if current == desired:
+        logger.debug(f"Profile name already correct: '{desired}'")
+        return False
+
+    logger.info(f"Updating profile name: '{current}' → '{desired}'")
+    result = await uazapi.update_profile_name(desired)
+
+    success = bool(result) and (
+        result.get("success") is True
+        or "profile" in result
+    )
+    if not success:
+        logger.warning(f"Profile name update failed: {result}")
+        return False
+
+    logger.info(f"Profile name updated to '{desired}'")
+    return True
