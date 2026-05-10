@@ -27,8 +27,12 @@ from sqlalchemy import select
 
 from app.core.config import get_settings
 from app.core.database import async_session
+from app.core.redis import get_redis
 from app.models.models import MediaAsset
 from app.services.uazapi import uazapi
+
+
+_LAST_PUSHED_NAME_KEY = "liriel:profile:last_pushed_name"
 
 
 # Resolve assets/ relative to the repo root (parent.parent.parent of this file)
@@ -110,16 +114,12 @@ async def push_profile_picture_if_changed() -> bool:
 
         result = await uazapi.update_profile_image(data_uri)
 
-        # Uazapi returns {success: bool, ...} on the documented happy path,
-        # but tolerate any 200 with a result dict.
-        success = bool(result) and (
-            result.get("success") is True
-            or "profile" in result
-            or "image_updated" in str(result)
-        )
-
-        if not success:
-            logger.warning(f"Profile picture push to Uazapi failed: {result}")
+        # Uazapi `_post` already returns None on non-2xx, so any dict back
+        # is effectively a successful upload. The documented response shape
+        # ({"success": true, ...}) doesn't actually match what the live
+        # endpoint returns ({"response": "..."}), so we don't pattern-match.
+        if result is None:
+            logger.warning("Profile picture push to Uazapi failed (no response)")
             return False
 
         asset.last_pushed_sha256 = asset.sha256
@@ -135,35 +135,30 @@ async def push_profile_picture_if_changed() -> bool:
 async def push_profile_name_if_changed() -> bool:
     """Reconcile the WhatsApp display name with settings.profile_name.
 
-    Reads the desired name from config, fetches the current name from
-    Uazapi /instance/status, and only POSTs /profile/name when the two
-    differ. WhatsApp rate-limits name changes, so the GET-then-compare
-    pattern keeps boots from burning that quota.
+    Why we don't trust /instance/status here: Uazapi's profileName field
+    in that response is the WhatsApp-side cached name and doesn't reflect
+    /profile/name updates immediately (or at all in some cases). So we
+    track the last-pushed value in Redis and only POST when it differs
+    from the desired one — this keeps us under WhatsApp's rate limit on
+    display-name changes without depending on a flaky read-back.
     """
     desired = (get_settings().profile_name or "").strip()
     if not desired:
         return False
 
-    status = await uazapi.get_instance_status()
-    if not status or "instance" not in status:
-        logger.warning("Could not fetch instance status — skipping name sync")
+    r = await get_redis()
+    last_pushed = await r.get(_LAST_PUSHED_NAME_KEY)
+    if last_pushed == desired:
+        logger.debug(f"Profile name already pushed: '{desired}'")
         return False
 
-    current = (status.get("instance", {}).get("profileName") or "").strip()
-    if current == desired:
-        logger.debug(f"Profile name already correct: '{desired}'")
-        return False
-
-    logger.info(f"Updating profile name: '{current}' → '{desired}'")
+    logger.info(f"Updating profile name: last pushed='{last_pushed}' → '{desired}'")
     result = await uazapi.update_profile_name(desired)
 
-    success = bool(result) and (
-        result.get("success") is True
-        or "profile" in result
-    )
-    if not success:
-        logger.warning(f"Profile name update failed: {result}")
+    if result is None:
+        logger.warning("Profile name update failed (no response from Uazapi)")
         return False
 
+    await r.set(_LAST_PUSHED_NAME_KEY, desired)
     logger.info(f"Profile name updated to '{desired}'")
     return True
