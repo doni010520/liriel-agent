@@ -99,6 +99,14 @@ async def add_event(
 
     except Exception as e:
         logger.error(f"Error creating event: {e}")
+        # Stash last error in Redis so we can inspect from /webhook flow
+        # in lieu of container log access (TEMPORARY DIAGNOSTIC)
+        try:
+            from app.core.redis import get_redis
+            r = await get_redis()
+            await r.set("liriel:diag:last_event_error", f"{type(e).__name__}: {e}", ex=3600)
+        except Exception:
+            pass
         return None
 
 

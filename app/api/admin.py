@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from loguru import logger
 
+from app.core.redis import get_redis
 from app.services.events_service import (
     add_event,
     remove_event,
@@ -67,6 +68,14 @@ async def api_delete_event(event: EventDelete):
     if success:
         return {"success": True, "message": f"Evento '{event.name}' removido"}
     raise HTTPException(404, f"Evento '{event.name}' não encontrado")
+
+
+@router.get("/events/last-error")
+async def api_last_event_error():
+    """TEMPORARY diagnostic — last error from add_event. Remove after debugging."""
+    r = await get_redis()
+    err = await r.get("liriel:diag:last_event_error")
+    return {"last_error": err}
 
 
 # ── Admin Panel HTML ───────────────────────────────────────
