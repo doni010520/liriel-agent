@@ -224,28 +224,55 @@ def _build_contact_context(contact: Contact) -> str:
     return "\n".join(parts) if parts else ""
 
 
-async def _send_response(phone: str, text: str) -> dict | None:
-    MAX_CHUNK = 4000
-    if len(text) <= MAX_CHUNK:
-        return await uazapi.send_text(phone, text)
+SPLIT_MARKER = "<NEXT>"
+MAX_CHUNK = 4000
 
-    chunks = []
-    current = ""
-    for paragraph in text.split("\n"):
-        if len(current) + len(paragraph) + 1 > MAX_CHUNK:
-            if current:
-                chunks.append(current.strip())
-            current = paragraph
-        else:
-            current += "\n" + paragraph if current else paragraph
-    if current.strip():
-        chunks.append(current.strip())
+
+def _split_into_bubbles(text: str) -> list[str]:
+    """Split LLM response into WhatsApp bubbles.
+
+    Primary split: <NEXT> markers emitted by the model.
+    Fallback safety: any bubble exceeding MAX_CHUNK is paragraph-split.
+    """
+    raw_parts = [p.strip() for p in text.split(SPLIT_MARKER)]
+    raw_parts = [p for p in raw_parts if p]
+
+    bubbles: list[str] = []
+    for part in raw_parts:
+        if len(part) <= MAX_CHUNK:
+            bubbles.append(part)
+            continue
+        current = ""
+        for paragraph in part.split("\n"):
+            if len(current) + len(paragraph) + 1 > MAX_CHUNK:
+                if current:
+                    bubbles.append(current.strip())
+                current = paragraph
+            else:
+                current += "\n" + paragraph if current else paragraph
+        if current.strip():
+            bubbles.append(current.strip())
+    return bubbles
+
+
+def _typing_delay_seconds(chunk: str) -> float:
+    """Simulate human typing time before the next bubble.
+
+    ~40ms per char, clamped to [0.8s, 3.0s].
+    """
+    return min(3.0, max(0.8, len(chunk) * 0.04))
+
+
+async def _send_response(phone: str, text: str) -> dict | None:
+    bubbles = _split_into_bubbles(text)
+    if not bubbles:
+        return None
 
     last_result = None
-    for i, chunk in enumerate(chunks):
-        last_result = await uazapi.send_text(phone, chunk)
-        if i < len(chunks) - 1:
-            await asyncio.sleep(1)
+    for i, bubble in enumerate(bubbles):
+        if i > 0:
+            await asyncio.sleep(_typing_delay_seconds(bubble))
+        last_result = await uazapi.send_text(phone, bubble)
     return last_result
 
 
