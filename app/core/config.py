@@ -31,7 +31,16 @@ class Settings(BaseSettings):
     # Webhook
     webhook_secret: str = ""
 
+    # Admin
+    # Comma-separated phone numbers (digits only, e.g. "557193061031,557188888888")
+    # whose Contact row should be auto-flagged is_admin=True at boot.
+    admin_phones: str = "557193061031"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @property
+    def admin_phone_list(self) -> list[str]:
+        return [p.strip() for p in self.admin_phones.split(",") if p.strip()]
 
 
 @lru_cache

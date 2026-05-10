@@ -11,10 +11,37 @@ from datetime import datetime, date
 from loguru import logger
 from sqlalchemy import delete, select
 
+from app.core.config import get_settings
 from app.core.database import async_session
 from app.core.redis import get_redis
 from app.models.models import Contact, Conversation, Message, NotificationLog
 from app.services.events_service import add_event, remove_event, list_future_events
+
+
+# ── Admin bootstrap (runs at lifespan startup) ─────────────
+
+async def bootstrap_admins() -> None:
+    """Ensure phones listed in settings.admin_phones are flagged is_admin=True.
+
+    Creates the Contact row if it doesn't exist yet so the user can issue
+    admin commands even before they've sent their first message.
+    """
+    phones = get_settings().admin_phone_list
+    if not phones:
+        return
+
+    async with async_session() as db:
+        for phone in phones:
+            contact = (await db.execute(
+                select(Contact).where(Contact.phone == phone)
+            )).scalar_one_or_none()
+            if contact is None:
+                db.add(Contact(phone=phone, is_admin=True))
+                logger.info(f"Bootstrapped admin contact: {phone}")
+            elif not contact.is_admin:
+                contact.is_admin = True
+                logger.info(f"Promoted existing contact to admin: {phone}")
+        await db.commit()
 
 
 # ── Self-serve commands (any user, on their own data) ──────

@@ -260,6 +260,81 @@ async def _text_search_events(
         return []
 
 
+async def seed_sample_events_if_empty() -> int:
+    """Populate a few sample one-off events on first boot.
+
+    Idempotent: skips silently if any active future events already exist.
+    Useful so the bot has realistic data to surface in {events_context}
+    while the church is still being onboarded.
+
+    Recurring weekly cults are NOT seeded here — they live in the system
+    prompt under <HORARIOS_DOS_CULTOS> and would otherwise duplicate.
+    """
+    today = date.today()
+    async with async_session() as db:
+        existing = (await db.execute(
+            text(
+                "SELECT COUNT(*) FROM events "
+                "WHERE is_active = true AND event_date >= :today"
+            ),
+            {"today": today},
+        )).scalar() or 0
+
+    if existing > 0:
+        logger.info(f"Events table already populated ({existing} future) — skipping sample seed")
+        return 0
+
+    samples = [
+        {
+            "name": "Encontro de Mulheres",
+            "event_date": today + timedelta(days=6),
+            "start_time": "14h",
+            "end_time": "18h",
+            "location": "Tenda da Lírio",
+            "description": "Tarde de comunhão, louvor e palavra com a Pra. Tainan.",
+        },
+        {
+            "name": "Aula de Batismo",
+            "event_date": today + timedelta(days=21),
+            "start_time": "17h",
+            "end_time": "19h",
+            "location": "Prédio Anexo",
+            "description": "Encontro preparatório para os candidatos ao próximo batismo.",
+        },
+        {
+            "name": "Curso de Membresia",
+            "event_date": today + timedelta(days=14),
+            "start_time": "9h",
+            "end_time": "12h",
+            "location": "Prédio Anexo",
+            "description": "Curso obrigatório para quem deseja se tornar membro da Lírio.",
+        },
+        {
+            "name": "Retiro de Jovens",
+            "event_date": today + timedelta(days=27),
+            "start_time": "8h",
+            "end_time": "17h",
+            "location": "Sítio em Mata de São João",
+            "description": "Retiro espiritual de fim de semana com o Pr. Silas e a equipe de jovens.",
+        },
+        {
+            "name": "Conferência de Missões 2026",
+            "event_date": today + timedelta(days=70),
+            "start_time": "19h",
+            "end_time": "21h30",
+            "location": "Tenda da Lírio",
+            "description": "Três noites de conferência sobre missões mundiais com pregadores convidados.",
+        },
+    ]
+
+    inserted = 0
+    for ev in samples:
+        if await add_event(**ev, created_by="bootstrap"):
+            inserted += 1
+    logger.info(f"Sample events seeded ({inserted}/{len(samples)})")
+    return inserted
+
+
 async def cleanup_past_events():
     """Remove events that have already passed. Run daily."""
     try:

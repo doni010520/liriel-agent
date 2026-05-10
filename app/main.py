@@ -16,8 +16,13 @@ from app.core.database import engine, Base, apply_schema_migrations
 from app.core.logging import setup_logging
 from app.core.redis import close_redis
 from app.models.models import Contact, Conversation, Message, KnowledgeBase, Event, NotificationLog  # noqa
+from app.services.admin_commands import bootstrap_admins
 from app.services.rag_service import setup_pgvector, seed_if_empty
-from app.services.events_service import setup_events_pgvector, cleanup_past_events
+from app.services.events_service import (
+    setup_events_pgvector,
+    cleanup_past_events,
+    seed_sample_events_if_empty,
+)
 
 
 settings = get_settings()
@@ -42,6 +47,12 @@ async def lifespan(app: FastAPI):
 
     # Seed knowledge base on first boot (idempotent — no-op if already seeded)
     await seed_if_empty()
+
+    # Seed sample events on first boot (idempotent — no-op if any future event exists)
+    await seed_sample_events_if_empty()
+
+    # Promote configured admin phone numbers (idempotent)
+    await bootstrap_admins()
 
     # Cleanup past events
     await cleanup_past_events()
