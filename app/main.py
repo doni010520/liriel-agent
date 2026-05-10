@@ -12,7 +12,7 @@ from app.api.admin import router as admin_router
 from app.api.health import router as health_router
 from app.api.webhook import router as webhook_router
 from app.core.config import get_settings
-from app.core.database import engine, Base
+from app.core.database import engine, Base, apply_schema_migrations
 from app.core.logging import setup_logging
 from app.core.redis import close_redis
 from app.models.models import Contact, Conversation, Message, KnowledgeBase, Event, NotificationLog  # noqa
@@ -32,6 +32,9 @@ async def lifespan(app: FastAPI):
     # Create tables
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Patch existing tables with new columns (idempotent)
+    await apply_schema_migrations()
 
     # Setup pgvector for knowledge base and events
     await setup_pgvector()

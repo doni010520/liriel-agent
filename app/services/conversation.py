@@ -17,10 +17,11 @@ Full message flow:
 """
 
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone, timedelta
+from uuid import UUID
 
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -39,13 +40,21 @@ from app.services.contact_updater import extract_cadastro, update_contact_from_c
 from app.services.events_service import search_events, list_future_events, format_events_context
 from app.services.media_processor import media_processor
 from app.services.notification_service import extract_notifications, process_notifications
-from app.services.openai_service import generate_response
+from app.services.openai_service import generate_response, summarize_conversation
 from app.services.rag_service import search_knowledge, build_rag_context
 from app.services.uazapi import uazapi
 
 settings = get_settings()
 
 MEDIA_TYPES = {"audio", "image", "document", "video", "sticker", "location", "contact"}
+
+# Trigger a rolling summary when this many new messages have accumulated
+# beyond the live history window since the last summary update.
+SUMMARY_REFRESH_INTERVAL = 10
+
+# Conversations idle for longer than this are archived and a fresh one is opened
+# on the next interaction (preserves contact data, drops stale chat context).
+CONVERSATION_INACTIVITY_DAYS = 30
 
 
 async def handle_incoming_message(parsed: dict):
@@ -158,8 +167,8 @@ async def _process_buffered_messages(phone: str):
         rag_results = await search_knowledge(combined_text, limit=3)
         rag_context = build_rag_context(rag_results)
 
-        # Build history
-        history = await _build_history(db, conversation.id)
+        # Build history (includes rolling summary when present)
+        history = await _build_history(db, conversation)
 
         # ── Generate response ──────────────────────────────────
         reply, tokens = await generate_response(
@@ -204,6 +213,10 @@ async def _process_buffered_messages(phone: str):
             asyncio.create_task(
                 process_notifications(notifications, phone, contact.name)
             )
+
+        # Refresh rolling summary in background when enough new messages
+        # have accumulated beyond the live history window
+        asyncio.create_task(_update_summary_if_needed(conversation.id))
 
 
 def _build_contact_context(contact: Contact) -> str:
@@ -309,6 +322,25 @@ async def _get_or_create_conversation(
         )
     )
     conversation = result.scalar_one_or_none()
+
+    if conversation:
+        # If the previous conversation has been idle for too long, archive it
+        # and start a new one. Keeps chat context fresh without losing contact
+        # data (which lives on the Contact, not the Conversation).
+        last_active = conversation.updated_at
+        if last_active is not None:
+            now = datetime.now(timezone.utc)
+            if last_active.tzinfo is None:
+                last_active = last_active.replace(tzinfo=timezone.utc)
+            if now - last_active > timedelta(days=CONVERSATION_INACTIVITY_DAYS):
+                conversation.is_active = False
+                await db.commit()
+                logger.info(
+                    f"Archived stale conversation {conversation.id} "
+                    f"(idle {(now - last_active).days}d), opening fresh one"
+                )
+                conversation = None
+
     if conversation:
         return conversation
 
@@ -319,10 +351,12 @@ async def _get_or_create_conversation(
     return conversation
 
 
-async def _build_history(db: AsyncSession, conversation_id) -> list[dict]:
+async def _build_history(
+    db: AsyncSession, conversation: Conversation
+) -> list[dict]:
     result = await db.execute(
         select(Message)
-        .where(Message.conversation_id == conversation_id)
+        .where(Message.conversation_id == conversation.id)
         .order_by(Message.created_at.desc())
         .limit(settings.max_history_messages)
     )
@@ -330,7 +364,81 @@ async def _build_history(db: AsyncSession, conversation_id) -> list[dict]:
     messages.reverse()
     if messages and messages[-1].role == "user":
         messages = messages[:-1]
-    return [{"role": msg.role, "content": msg.content} for msg in messages]
+
+    history: list[dict] = []
+    if conversation.summary:
+        history.append({
+            "role": "system",
+            "content": (
+                "Resumo do histórico anterior dessa conversa "
+                "(use como contexto, não cite literalmente):\n"
+                f"{conversation.summary}"
+            ),
+        })
+    history.extend({"role": msg.role, "content": msg.content} for msg in messages)
+    return history
+
+
+async def _update_summary_if_needed(conversation_id: UUID) -> None:
+    """Refresh the rolling summary when enough new messages accumulated.
+
+    Runs in its own DB session so it can be fired-and-forgotten after
+    the user response is sent. Summarises everything older than the
+    live history window so the model never loses long-running context.
+    """
+    try:
+        async with async_session() as db:
+            total = (await db.execute(
+                select(func.count(Message.id))
+                .where(Message.conversation_id == conversation_id)
+            )).scalar() or 0
+
+            if total <= settings.max_history_messages:
+                return
+
+            conv = (await db.execute(
+                select(Conversation).where(Conversation.id == conversation_id)
+            )).scalar_one_or_none()
+            if conv is None:
+                return
+
+            # Number of messages older than the live window
+            old_count = total - settings.max_history_messages
+            new_since_last = old_count - (conv.summary_message_count or 0)
+            if new_since_last < SUMMARY_REFRESH_INTERVAL:
+                return
+
+            # Pull the messages we want to summarize (everything except the
+            # last MAX_HISTORY_MESSAGES, in chronological order)
+            old_messages = (await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation_id)
+                .order_by(Message.created_at.asc())
+                .limit(old_count)
+            )).scalars().all()
+
+            if not old_messages:
+                return
+
+            text_blocks = [
+                f"{'Usuário' if m.role == 'user' else 'Liriel'}: {m.content}"
+                for m in old_messages
+            ]
+            history_text = "\n".join(text_blocks)
+
+            new_summary = await summarize_conversation(history_text)
+            if not new_summary:
+                return
+
+            conv.summary = new_summary
+            conv.summary_message_count = old_count
+            await db.commit()
+            logger.info(
+                f"Conversation {conversation_id} summary updated "
+                f"({old_count} msgs covered)"
+            )
+    except Exception as e:
+        logger.error(f"Summary update failed for {conversation_id}: {e}")
 
 
 async def _resolve_quoted_message(quoted_id: str, parsed: dict) -> str | None:

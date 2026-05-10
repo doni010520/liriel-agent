@@ -65,6 +65,8 @@ class Conversation(Base):
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    summary: Mapped[str | None] = mapped_column(Text)
+    summary_message_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

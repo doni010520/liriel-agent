@@ -90,3 +90,44 @@ async def generate_response(
             "Desculpe, tive um probleminha aqui 😊 Pode tentar de novo?",
             0,
         )
+
+
+SUMMARY_PROMPT = """Você está sumarizando uma conversa do WhatsApp entre Liriel \
+(assistente da Igreja Batista Lírio dos Vales de Jardim Armação) e uma pessoa \
+da igreja, para que a Liriel mantenha contexto em conversas longas.
+
+Resuma em 4-8 frases curtas, em português, capturando:
+- Nome da pessoa e vínculo (membro/congregado/visitante), se mencionados
+- Dados pessoais coletados (aniversário, bairro, como conheceu)
+- Pedidos ou interesses (oração, batismo, GC, ministério, eventos)
+- Situações delicadas, pendências, ou pedidos não resolvidos
+- Tom geral e qualquer informação importante para continuar a conversa
+
+Não invente informação que não esteja no histórico. Se não houver dados pessoais, \
+foque nos pedidos e tom da conversa. Não cite a Liriel em terceira pessoa — \
+escreva como notas operacionais ("Pessoa pediu oração... informou que mora em ...").
+
+Conversa:
+---
+{history}
+---
+
+Resumo operacional:"""
+
+
+async def summarize_conversation(history_text: str) -> str | None:
+    """Generate a rolling summary of older conversation messages."""
+    if not history_text.strip():
+        return None
+    try:
+        response = await client.chat.completions.create(
+            model=settings.openai_model,
+            messages=[{"role": "user", "content": SUMMARY_PROMPT.format(history=history_text)}],
+            temperature=0.2,
+            max_tokens=400,
+        )
+        summary = (response.choices[0].message.content or "").strip()
+        return summary or None
+    except Exception as e:
+        logger.error(f"Summary generation error: {e}")
+        return None
